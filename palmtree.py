@@ -1,10 +1,11 @@
 import numpy as np
 from os import environ
 from data_organization import DataOrganization
-from keras.models import Model
-from keras.layers import Conv2D, Dense, Dropout, Flatten, Input, Add, LeakyReLU, ZeroPadding2D, BatchNormalization, AveragePooling2D, MaxPooling2D
-from keras.optimizers import Adam
+from torch.nn import Conv2d, MaxPool2d, Linear, ReLU, Softmax, Softsign, Tanh, ZeroPad2d, Module, LeakyReLU, BatchNorm1d, Flatten, CrossEntropyLoss, MSELoss
+from torch.optim import SGD, Adam
 import chess
+from copy import deepcopy
+
 classification_map = {
     'a': 0,
     'b': 1,
@@ -16,67 +17,119 @@ classification_map = {
     'h': 7
 }
 
-class Palmtree():
-    model: Model = None
+class Palmtree(Module):
     max_nodes_per_iteration = 100
-    def __init__(self, data_org=None):
-        self.model = self.create_model_v2()
-        self.data_org = data_org if data_org else DataOrganization()
+    intro_layers = []
+    residual_layers = []
+    classification_layers = []
+    from_policy_layers = []
+    to_policy_layers = []
     
-    '''
-    finds the best move with no searching
-    '''
-    def generate_best_move(self, board: chess.Board) -> str:
-        _, max_move = self.get_all_moves(board)
-        # if we return an empty string that means the board is terminal. Caller's error, we'll print the board for their debug benefit
-        if max_move == '':
-            print('ERROR: No moves found for position:')
-            print(board)
-        return max_move
+    def __init__(self, data_org=None, num_residuals=24):
+        super(Palmtree, self).__init__()
+        self.model = self.create_model()
+        self.data_org = data_org if data_org else DataOrganization()
+        self.optimizer = SGD(self.parameters(), .00005)
+        self.policy_loss = CrossEntropyLoss()
+        self.classification_loss = MSELoss()
+        
+    def create_model(self, num_residuals: int):
+        self.intro_layers = [
+            ZeroPad2d(padding=(2, 2)),
+            Conv2d(13, 256, 2, 1, 0),
+            LeakyReLU()
+        ]
+        for _ in range(num_residuals):
+            layer = []
+            layer.append(Conv2d(256, 256, 2, 1, padding='same'))
+            layer.append(LeakyReLU())
+            layer.append(BatchNorm1d(256))
+            self.residual_layers.append(layer)
+        # define classification layers
+        self.classification_layers = [
+            Conv2d(256, 256, 2, 1, padding=0),
+            LeakyReLU(),
+            BatchNorm1d(128),
+            Conv2d(256, 128, 2, 1, padding=0),
+            LeakyReLU(),
+            BatchNorm1d(128),
+            Conv2d(128, 64, 2, 1, padding=0),
+            LeakyReLU(),
+            MaxPool2d(kernel_size=(2, 2), stride=2),
+            Flatten(),
+            Linear(1234, 128),
+            Softsign(),
+            Linear(128, 1),
+            Tanh()
+        ]
+        
+        # define policy layers
+        self.from_policy_layers = [
+            Conv2d(256, 256, 2, 1, padding=0),
+            BatchNorm1d(256),
+            ReLU(),
+            Conv2d(256, 128, 2, 1, padding=0),
+            BatchNorm1d(128),
+            Conv2d(128, 64, 2, 1, padding=0),
+            MaxPool2d(kernel_size=(2, 2), stride=2),
+            BatchNorm1d(32),
+            Flatten(),
+            Linear(5 * 7 * 32, 64),
+            Softmax()
+        ]
+        
+        self.to_policy_layers = deepcopy(self.from_policy_layers)
+    
+    def forward(self, x):
+        for layer in self.intro_layers:
+            x = layer(x)
+        for residual_layer in self.residual_layers:
+            x_in = x
+            for layer in residual_layer:
+                x = layer(x)
+            x += x_in
+        
+        classification_out = policy_from_out, policy_to_out = x
+        for layer in self.classification_layers:
+            classification_out = layer(classification_out)
+        for layer in self.from_policy_layers:
+            policy_from_out = layer(policy_from_out)
+        for layer in self.to_policy_layers:
+            policy_to_out = layer(policy_to_out)
 
-    '''
-    generates move probabilities for the position
-    returns a dictionary of key value pairs of moves and probabilities
-    '''
-    def get_all_moves(self, board: chess.Board):
-        move_probs = {}
-        x = []
-        moves = []
-        for move in board.generate_legal_moves():
-            board.push(move)
-            x.append(self.data_org.get_binary_board(board))
-            moves.append(move.uci())
-            board.pop()
-        x = np.asarray(x)
-        if x.shape == (0,):
-            return x, None
-        prediction = self.model.predict_on_batch(x)
-        max = np.NINF
-        max_move = ''
-        for x, y in zip(moves, prediction):
-            move_probs[x] = y[0]
-            if y[0] > max:
-                max = y[0]
-                max_move = x
-        return move_probs, max_move
-
-    def print_best_moves(self, moves):
-        to_print = {}
-        m = np.NINF
-        for move in moves:
-            if len(to_print) < 3:
-                m = moves[move]
-                to_print[move] = m
-            else:
-                to_remove = None
-                for best in to_print:
-                    if moves[move] > to_print[best]:
-                        to_remove = best
-                if to_remove:
-                    del to_print[to_remove] 
-                    to_print[move] = moves[move]
-        print(to_print)
+        return classification_out, policy_from_out, policy_to_out
+        
+    def train(self, x, y, epochs, verbose=True) -> dict:
+        hist_to = []
+        hist_from = []
+        hist_class = []
+        for epoch in range(epochs):
+            running_loss = 0.0
+            for idx, y_class, y_fr, y_to in enumerate(y):
+                self.optimizer.zero_grad()
+                classification, policy_from, policy_to = self(x[idx])
                 
+                class_loss = self.classification_loss(classification, y_class)
+                from_loss = self.policy_loss(policy_from, y_fr)
+                to_loss = self.policy_loss(policy_to, y_to)
+                class_loss.backward()
+                from_loss.backward()
+                to_loss.backward()
+                
+                self.optimizer.step()
+                
+                running_loss += to_loss.item() + from_loss.item() + class_loss.item()
+                hist_to.append(to_loss.item())
+                hist_to.append(to_loss.item())
+
+                if verbose and idx % 30 == 29:
+                    print(f'[{epoch + 1}, {idx + 1:5d}] loss: {running_loss / 2000:.3f}')
+                    running_loss = 0.0
+        return {
+            'class': hist_class, 'from': hist_from, 'to': hist_to
+        }
+
+
     def make_move(self, board: chess.Board):
         return self.explore_moves(board)
 
@@ -96,16 +149,12 @@ class Palmtree():
     '''
     given a board, return a vector of moves->probabilities and a policy rating
     '''
-    def get_moves(self, board: chess.Board()):
-        [[from_squares], [to_squares], [[rating]]] = self.model.predict_on_batch(np.array([self.data_org.get_binary_board(board)]))
-        return from_squares, to_squares, rating
-    
-    def predict(self, board: chess.Board):
-        from_squares, to_squares, rating = self.get_moves(board)
+    def get_moves(self, board: chess.Board):
+        [[from_squares], [to_squares], [[rating]]] = self(np.array([self.data_org.get_binary_board(board)]))
         return from_squares, to_squares, rating
     
     def predict_on_batch(self, batch):
-        return self.model.__call__(batch)
+        return self(batch)
 
     @staticmethod
     def interpret_p(from_squares, to_squares, board: chess.Board):
@@ -141,54 +190,3 @@ class Palmtree():
     @staticmethod
     def get_index(move: str):
         return classification_map[move[0]] + (int(move[1]) - 1) * 8, classification_map[move[2]] + (int(move[3]) - 1) * 8
-
-    def create_model_v2(self, num_residuals=10):
-        board_input = x = Input((8, 9, 13))
-        x = ZeroPadding2D()(x)
-        x = (Conv2D(filters=256, kernel_size=2))(x)
-        x = (LeakyReLU(alpha=.01))(x)
-        for i in range(num_residuals):
-            x = self.build_residual_layer(x, i % 3 == 2)
-        
-        from_output = self.build_state_output(x, 'from_output')
-        to_output = self.build_state_output(x, 'to_output')
-        classification_output = self.build_classification_output(x)
-        model = Model(board_input, [from_output, to_output, classification_output])
-        print('done creating model')
-        # Compile the model
-        model.compile(loss=['categorical_crossentropy', 'categorical_crossentropy', 'mean_squared_error'], optimizer=Adam(.00003))
-        print(model.summary())
-        return model
-
-    def build_residual_layer(self, x_in, normalize):
-        x = x_res = x_in
-        x = (Conv2D(filters=256, kernel_size=2, padding="same"))(x)
-        if normalize: x = BatchNormalization(axis=3)(x)
-        x = (LeakyReLU(alpha=.01))(x)
-        x = (Add())([x, x_res])
-        return x
-
-    def build_state_output(self, x, name='state_output'):
-        x = (Conv2D(filters=256, kernel_size=2, activation='relu'))(x)
-        x = BatchNormalization(axis=3)(x)
-        x = (Conv2D(filters=128, kernel_size=2, activation='relu'))(x)
-        x = BatchNormalization(axis=3)(x)
-        x = (Conv2D(filters=64, kernel_size=2, activation='relu'))(x)
-        x = (AveragePooling2D(pool_size=(2, 2)))(x)
-        x = BatchNormalization(axis=3)(x)
-        x = Flatten()(x)
-        x = Dense(64, activation='softmax', name=name)(x)
-        return x
-
-    def build_classification_output(self, x, name='class_output'):
-        x = (Conv2D(filters=256, kernel_size=2))(x)
-        x = (LeakyReLU(alpha=.01))(x)
-        x = (Conv2D(filters=128, kernel_size=2))(x)
-        x = BatchNormalization(axis=3)(x)
-        x = (Conv2D(filters=64, kernel_size=2))(x)
-        x = (LeakyReLU(alpha=.01))(x)
-        x = (AveragePooling2D(pool_size=(2, 2)))(x)
-        x = (Flatten())(x)
-        x = (Dense(128, activation='softsign'))(x)
-        x = (Dense(1, activation='tanh', name=name))(x)
-        return x

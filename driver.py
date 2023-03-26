@@ -1,19 +1,13 @@
 import faulthandler
 faulthandler.enable()
 import numpy as np
-from os import getcwd, environ
-import plaidml.keras
-environ["KERAS_BACKEND"] = "plaidml.keras.backend"
-environ["RUNFILES_DIR"] = "/Library/Frameworks/Python.framework/Versions/3.8/shared/plaidml"
-environ["PLAIDML_NATIVE_PATH"] = "/Library/Frameworks/Python.framework/Versions/3.8/lib/libplaidml.dylib"
-plaidml.keras.install_backend()
+from os import getcwd
 from data_organization import DataOrganization
 from palmtree import Palmtree
 from self_play import SelfPlay
 from lichess_integration import LichessIntegration
 from player import Player
 from asyncio import run
-#print('using ' + keras.backend.backend() + ' as backend')
 import chess
 import matplotlib.pyplot as plt
 import multiprocessing as mp
@@ -38,15 +32,9 @@ class Driver:
             y1[idx] = self.data[fen][1]
             y2[idx] = self.data[fen][2]
             y3[idx] = self.data[fen][3]
-        try:
-            print(len(x))
-            print(len(y2))
-            print(len(y1))
-            print(len(y3))
 
-            hist = self.tree.model.fit(x=x, y=[y1, y2, y3], epochs=epochs, verbose=1, batch_size=batch_size, shuffle=True)
-        except KeyboardInterrupt:
-            pass
+            hist = self.tree.train(x=x, y=(y1, y2, y3), epochs=epochs, verbose=1)
+
         self.pickle(self.tree, 'models/ALBERT')
         plt.plot(hist.history['loss'])
         print(hist.history)
