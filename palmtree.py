@@ -3,7 +3,7 @@ from data_organization import DataOrganization
 from torch.nn import Conv2d, MaxPool2d, Linear, ReLU, Softmax, Softsign, Tanh, ZeroPad2d, Module, LeakyReLU, BatchNorm1d, Flatten, CrossEntropyLoss, MSELoss
 from torch.optim import SGD, Adam
 from torch import from_numpy, device
-from torch.cuda import FloatTensor, is_available
+from torch.cuda import is_available
 import torch
 device = device('cuda:0' if is_available() else 'cpu')
 import chess
@@ -67,10 +67,10 @@ class Palmtree(Module):
             ('c_conv_3', Conv2d(128, 64, 2, 1, padding=0, device=device)),
             ('c_lr_3', LeakyReLU()),
             ('c_mp', MaxPool2d(kernel_size=(2, 2), stride=2)),
-            ('c_f', Flatten()),
-            ('c_l_1', Linear(1234, 128)),
+            ('c_f', Flatten(0, -1)),
+            ('c_l_1', Linear(1024, 256, device=device)),
             ('c_ss', Softsign()),
-            ('c_l_2', Linear(128, 1)),
+            ('c_l_2', Linear(256, 1, device=device)),
             ('c_out', Tanh())
         ]
         for entry in self.from_policy_layers:
@@ -87,9 +87,11 @@ class Palmtree(Module):
             ('relu_2', ReLU()),
             ('bn_3', BatchNorm1d(8)),
             ('mp', MaxPool2d(kernel_size=(2, 2), stride=2)),
-            ('flatten', Flatten()),
-            ('lin', Linear(5 * 7 * 32, 64)),
-            ('out', Softmax())
+            ('f', Flatten(0, -1)),
+            ('lin_1', Linear(1024, 256, device=device)),
+            ('relu_3', ReLU()),
+            ('lin_2', Linear(256, 64, device=device)),
+            ('out', Softmax(dim=-1))
         ]
         
         self.to_policy_layers = deepcopy(self.from_policy_layers)
@@ -100,16 +102,13 @@ class Palmtree(Module):
 
 
     
-    def forward(self, x: torch.Tensor):
-        print(x.shape)
+    def forward(self, x):
         x = x.to(device=device)
         for layer in self.intro_layers:
-            print(layer)
             x = layer(x)
         for residual_layer in self.residual_layers:
             x_in = x
             for layer in residual_layer:
-                print(layer)
                 x = layer(x)
             x += x_in
         
@@ -127,6 +126,7 @@ class Palmtree(Module):
         hist_to = []
         hist_from = []
         hist_class = []
+        x = torch.utils.data.DataLoader(x, batch_size = 64)
         for epoch in range(epochs):
             running_loss = 0.0
             for idx, pos in enumerate(x):
@@ -136,16 +136,16 @@ class Palmtree(Module):
                 class_loss = self.classification_loss(classification, y_class[idx])
                 from_loss = self.policy_loss(policy_from, y_fr[idx])
                 to_loss = self.policy_loss(policy_to, y_to[idx])
-                class_loss.backward()
-                from_loss.backward()
-                to_loss.backward()
                 
-                self.optimizer.step()
-                
+                loss = to_loss + from_loss + class_loss
                 running_loss += to_loss.item() + from_loss.item() + class_loss.item()
+                
                 hist_to.append(to_loss.item())
-                hist_to.append(to_loss.item())
-
+                hist_from.append(from_loss.item())
+                hist_class.append(class_loss.item())
+                
+                loss.backward()
+                self.optimizer.step()
                 if verbose and idx % 30 == 29:
                     print(f'[{epoch + 1}, {idx + 1:5d}] loss: {running_loss / 2000:.3f}')
                     running_loss = 0.0
@@ -178,6 +178,7 @@ class Palmtree(Module):
         return from_squares, to_squares, rating
     
     def predict_on_batch(self, batch):
+        batch = torch.tensor(batch, dtype=torch.float32).permute((2, 0, 1))
         return self(batch)
 
     @staticmethod

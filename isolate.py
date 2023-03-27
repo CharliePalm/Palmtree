@@ -20,7 +20,7 @@ def train_model(model, x, y1, y2, y3, epochs):
     l = len(x)
     print('data length: ' + str(l))
     if l:
-        hist = model.model.fit(x, [y1, y2, y3], epochs=epochs, batch_size=32, verbose=0)
+        hist = model.train(x, y1, y2, y3, epochs=epochs, batch_size=32, verbose=0)
     return model, hist.history['loss']
 
 def predict_on_batch(model, batch):

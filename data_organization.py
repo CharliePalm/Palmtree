@@ -133,10 +133,10 @@ class DataOrganization:
             f_index, t_index = self.get_index(move_uci)
             y_f_i[f_index], y_t_i[t_index] = 1.0, 1.0
             x_i = self.get_binary_board(board)
-            self.x.append(torch.from_numpy(x_i).permute((2, 0, 1)))
-            self.y_f.append(torch.from_numpy(y_f_i))
-            self.y_t.append(torch.from_numpy(y_t_i))
-            self.y_c.append(1.0 if iterations % 2 == (0 if is_white else 1) else -1.0)
+            self.x.append(torch.tensor(x_i, dtype=torch.float32).permute((2, 0, 1)))
+            self.y_f.append(torch.tensor(y_f_i, dtype=torch.float32))
+            self.y_t.append(torch.tensor(y_t_i, dtype=torch.float32))
+            self.y_c.append(torch.tensor([1.0 if iterations % 2 == (0 if is_white else 1) else -1.0], dtype=torch.float32))
             board.push(move)
     
     def get_binary_board(self, board: chess.Board, is_single_batch = False):

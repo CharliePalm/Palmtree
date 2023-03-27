@@ -8,14 +8,14 @@ from threading import Lock, Thread, active_count
 import multiprocess as mp
 from isolate import select
 from time import sleep
-
+import torch
 sys.setrecursionlimit(100000)
 from isolate import flush_queue
 C_EXPLORE = 10 # ideally this would be a learned constant. We need to prevent the model from frequenting the same states to prevent it from drawing early on
 C_EXPLOIT = 50
 UNCALCULATED = -2
 MAX_PROPAGATION_SIZE = 10e3
-BATCH_SIZE = 4
+BATCH_SIZE = 256
 VISIT_REDUCTION_SCALE = 1.1
 '''
 node class that represents a position. 
@@ -221,19 +221,20 @@ class MCTS:
         self.add_to_propagation_queue(nodes)
         
     def propagate(self, x, y):
+        node_idx = 0
         with self.model_lock:
-            for f, t, values in self.generate_propagation_data(x):
-                for idx, value in enumerate(values):
-                    node = self.get(y[idx])
+            for result in self.generate_propagation_data(x):
+                for value, f, t in result:
+                    node = self.get(y[node_idx])
                     propagation = set()
                     if not node.explored:
-                        node.update_value(value[0], True, propagation)
-                        node.set_pi(f[idx], t[idx])
+                        node.update_value(value.item(), True, propagation)
+                        node.set_pi(f.detach().numpy(), t.detach().numpy())
                     else:
                         node.update_value(node.base_value, True, propagation, True)
+                    node_idx += 1
 
     def flush(self):
-        print(len(self.propagation_queue))
         if self.propagation_queue:
             x = []
             y = []
@@ -247,7 +248,9 @@ class MCTS:
         i = 0
         l = len(x)
         while i < l:
-            yield self.model.predict_on_batch(np.asarray(x[i:i+BATCH_SIZE if i + BATCH_SIZE < l else l]))
+            #yield self.model.predict_on_batch(x[i:i+BATCH_SIZE if i + BATCH_SIZE < l else l])
+            yield [self.model.predict_on_batch(x[j + i]) for j in range(BATCH_SIZE if i + BATCH_SIZE < l else l - i)]
+            #yield self.model.predict_on_batch(x[i])
             i += BATCH_SIZE
 
     def visit_nodes(self, positions: set):

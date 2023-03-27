@@ -24,7 +24,7 @@ class SelfPlay:
     data = {}
     training_started = False
 
-    def __init__(self, initial_model, epochs=10, simulations=150, data_org: DataOrganization=None, games_per_epoch=100):
+    def __init__(self, initial_model, epochs=10, simulations=20, data_org: DataOrganization=None, games_per_epoch=100):
         self.epochs = epochs
         self.simulations = simulations
         self.current_model = initial_model
