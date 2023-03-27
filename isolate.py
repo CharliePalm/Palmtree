@@ -26,7 +26,7 @@ def train_model(model, x, y1, y2, y3, epochs):
 def predict_on_batch(model, batch):
     return model.predict_on_batch(batch)
 
-def select(node) -> tuple[str, list[str], set[str], bool]:
+def select(node) -> tuple:
     path = set()
     while 1:
         path.add(node.fen)

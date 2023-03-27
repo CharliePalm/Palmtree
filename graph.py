@@ -250,7 +250,7 @@ class MCTS:
             yield self.model.predict_on_batch(np.asarray(x[i:i+BATCH_SIZE if i + BATCH_SIZE < l else l]))
             i += BATCH_SIZE
 
-    def visit_nodes(self, positions: set[str]):
+    def visit_nodes(self, positions: set):
         for position in positions:
             self.get(position).visit()
 

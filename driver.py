@@ -22,18 +22,26 @@ class Driver:
     def train(self, use_existing_data=True, epochs=50, batch_size=200, data_len=None):
         if not self.data and use_existing_data:
             self.load_data()
-        l = len(self.data)
-        x = np.zeros(shape=(l, 8, 9, 13))
-        y1 = np.zeros(shape=(l, 64))
-        y2 = np.zeros(shape=(l, 64))
-        y3 = np.zeros(shape=(l))
-        for idx, fen in enumerate(self.data):
-            x[idx] = self.data[fen][0]
-            y1[idx] = self.data[fen][1]
-            y2[idx] = self.data[fen][2]
-            y3[idx] = self.data[fen][3]
 
-            hist = self.tree.train(x=x, y=(y1, y2, y3), epochs=epochs, verbose=1)
+        if type(self.data) == dict:
+            l = len(self.data.x)
+            x = np.zeros(shape=(l, 13, 8, 9))
+            y1 = np.zeros(shape=(l))
+            y2 = np.zeros(shape=(l, 64))
+            y3 = np.zeros(shape=(l, 64))
+            for idx, fen in enumerate(self.data):
+                x[idx] = self.data[fen][0]
+                y1[idx] = self.data[fen][1]
+                y2[idx] = self.data[fen][2]
+                y3[idx] = self.data[fen][3]
+        else:
+            x = self.data.x
+            y1 = self.data.y_c
+            y2 = self.data.y_f
+            y3 = self.data.y_t
+
+
+            hist = self.tree.train(x=x, y_class=y1, y_fr=y2, y_to=y3, epochs=epochs, verbose=1)
 
         self.pickle(self.tree, 'models/ALBERT')
         plt.plot(hist.history['loss'])
@@ -44,7 +52,7 @@ class Driver:
         self.data_org.create_pickle(path, data)
 
     def load_data(self):
-        self.data = self.data_org.depickle('data/data')
+        self.data = self.data_org.depickle('data/gm_data')
 
     def start_self_play(self, epochs=100):
         self.self_play = SelfPlay(self.tree, data_org=self.data_org)
@@ -52,7 +60,6 @@ class Driver:
 
     def create_data(self):
         self.data = self.data_org.gather_data()
-        self.pickle(self.data_org, 'data/data')
 
     def start_play(self):
         response = input('would you like to start playing through the lichess API or locally? y=lichess, n=local\n')
@@ -166,7 +173,7 @@ class Driver:
 
 
 if __name__ == "__main__":
-    mp.set_start_method('spawn')
+    mp.set_start_method('fork')
     from argparse import ArgumentParser
     parser = ArgumentParser()
     parser.add_argument('-t', '--train', action="store_true")
