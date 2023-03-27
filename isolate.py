@@ -16,11 +16,11 @@ def flush_queue(x, model):
     f, t, values = model.predict_on_batch(x)
     return f, t, values
 
-def train_model(model, x, y1, y2, y3, epochs):
+def train_model(model, x, y_c, y_f, y_t, epochs):
     l = len(x)
     print('data length: ' + str(l))
     if l:
-        hist = model.train(x, y1, y2, y3, epochs=epochs, batch_size=32, verbose=0)
+        hist = model.train(x, y_c, y_f, y_t, epochs=epochs, verbose=0)
     return model, hist.history['loss']
 
 def predict_on_batch(model, batch):

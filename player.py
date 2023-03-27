@@ -6,12 +6,12 @@ from data_organization import DataOrganization
 class Player:
     mcts: MCTS = None
     discovery_lock = Lock()
-    def __init__(self, model: Palmtree, simulations=20):
+    def __init__(self, model: Palmtree, simulations=500):
         self.model = model
         self.simulations = simulations
         self.data_org = DataOrganization()
         self.mcts = MCTS(self.data_org, Board(), False, self.model)
-        Thread(target=self.discover, args=(), daemon=True).start()
+        #Thread(target=self.discover, args=(), daemon=True).start()
 
     '''
     given a board, return a uci move
@@ -27,7 +27,7 @@ class Player:
         with self.discovery_lock:
             for i in range(self.simulations):
                 self.mcts.select(node)
-
+            self.mcts.flush()
             (f_a, t_a) = node.calc_pi()
             _, moves, probs = self.model.interpret_p(f_a, t_a, Board(node.dirty_fen))
             move = self.model.get_proportional_prediction(moves, probs)

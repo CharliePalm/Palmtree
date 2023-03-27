@@ -1,7 +1,7 @@
 import os
 import pickle
 import chess
-from chess.pgn import read_game
+from chess.pgn import read_game, Game
 from copy import deepcopy
 import numpy as np
 import torch
@@ -63,7 +63,7 @@ classification_map = {
 
 class DataOrganization:
     MAX_MOVES = 100
-    GAME_COUNT = 100
+    GAME_COUNT = 20
     def __init__(self, path=''):
         self.path = path
         self.x = []
@@ -98,8 +98,8 @@ class DataOrganization:
                     elif result == '0-1':
                         self.get_game_data(game, False, games)
                     else:
-                        self.get_game_data(game, False, games)
-                        self.get_game_data(game, True, games)
+                        self.get_game_data(game, False, games, False)
+                        self.get_game_data(game, True, games, False)
                     # the chess package can sometimes be finicky about which games it wants to read. This prevents any unnecessary breakdowns
                     try:
                         game = read_game(pgn)
@@ -121,8 +121,9 @@ class DataOrganization:
         print('white' if self.find_key(x[0][7][8], turn_map) == chess.WHITE else 'black')
 
 
-    def get_game_data(self, game, is_white, games):
+    def get_game_data(self, game: Game, is_white, games, is_win=True):
         board = chess.Board()
+        l = len(game.mainline_moves())
         for iterations, move in enumerate(game.mainline_moves()):
             # we dont want white's moves if we're black and vice versa and we dont want to overload the model with opening knowledge
             if (games % 10 != 0 and iterations < 15):
@@ -136,7 +137,7 @@ class DataOrganization:
             self.x.append(torch.tensor(x_i, dtype=torch.float32).permute((2, 0, 1)))
             self.y_f.append(torch.tensor(y_f_i, dtype=torch.float32))
             self.y_t.append(torch.tensor(y_t_i, dtype=torch.float32))
-            self.y_c.append(torch.tensor([1.0 if iterations % 2 == (0 if is_white else 1) else -1.0], dtype=torch.float32))
+            self.y_c.append(torch.tensor([((1.0 if iterations % 2 == (0 if is_white else 1) else -1.0) if is_win else 0) / (l - iterations)], dtype=torch.float32))
             board.push(move)
     
     def get_binary_board(self, board: chess.Board, is_single_batch = False):
@@ -174,7 +175,7 @@ class DataOrganization:
             fen_idx += 1 # for / character
             output_board[7-i] = row
         output_board[7][8] = turn_map[fen[fen_idx]]
-        return output_board
+        return torch.tensor(output_board, dtype=torch.float32).permute(2, 0, 1)
      
     @staticmethod   
     def get_index(move: str) -> tuple:

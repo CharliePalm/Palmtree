@@ -7,6 +7,7 @@ from threading import Lock, Thread
 import matplotlib.pyplot as plt
 from player import Player
 from time import sleep
+import torch
 from random import choice
 import multiprocessing as mp
 from isolate import train_model
@@ -24,7 +25,7 @@ class SelfPlay:
     data = {}
     training_started = False
 
-    def __init__(self, initial_model, epochs=10, simulations=20, data_org: DataOrganization=None, games_per_epoch=100):
+    def __init__(self, initial_model, epochs=10, simulations=2, data_org: DataOrganization=None, games_per_epoch=100):
         self.epochs = epochs
         self.simulations = simulations
         self.current_model = initial_model
@@ -92,6 +93,7 @@ class SelfPlay:
         board = chess.Board()
         node = self.mcts.root
         while True:
+            print(board)
             for _ in range(self.simulations):
                 self.mcts.select(node)
                 if len(self.mcts.propagation_queue) > 1000:
@@ -119,6 +121,7 @@ class SelfPlay:
                     terminal_node.update_value(terminal_node.base_value, True, set(), True)
                 path.append(terminal_node)
                 Thread(target=self.gather_data, args=(path,), daemon=True).start()
+                sleep(20)
                 return
             node = self.mcts.get(self.data_org.clean_fen(fen))
 
@@ -131,7 +134,7 @@ class SelfPlay:
                     del self.data[choice]
             for node in path:
                 pi = node.calc_pi()
-                self.data[node.fen] = (self.data_org.get_binary_board_from_fen(node.dirty_fen), pi[0], pi[1], node.base_value)
+                self.data[node.fen] = (self.data_org.get_binary_board_from_fen(node.dirty_fen), torch.tensor(pi[0], dtype=torch.float32), torch.tensor(pi[1], dtype=torch.float32), node.base_value)
         if not self.training_started:
             self.training_started = True
             self.start_training()
@@ -142,24 +145,24 @@ class SelfPlay:
                 if not self.data:
                     continue
                 l = len(self.data)
-                x = np.zeros(shape=(l, 8, 9, 13))
-                y1 = np.zeros(shape=(l, 64))
-                y2 = np.zeros(shape=(l, 64))
-                y3 = np.zeros(shape=(l))
+                x = []
+                y_f = []
+                y_t = []
+                y_c = []
                 for idx, fen in enumerate(self.data):
-                    x[idx] = self.data[fen][0]
-                    y1[idx] = self.data[fen][1]
-                    y2[idx] = self.data[fen][2]
-                    y3[idx] = self.data[fen][3]
-            self.train(x, y1, y2, y3)
+                    x.append(self.data[fen][0])
+                    y_f.append(self.data[fen][1])
+                    y_t.append(self.data[fen][2])
+                    y_c.append(torch.tensor([self.data[fen][3]], dtype=torch.float32))
+            self.train(x, y_c, y_f, y_t)
             sleep(240)
 
-    def train(self, x, y1, y2, y3):
+    def train(self, x, y_c, y_f, y_t):
         self.data_org.create_pickle('models/self_play_v11', self.current_model)
         with self.data_lock:
             self.data_org.create_pickle('data/data', self.data)
         with mp.Pool() as pool:
-            model, batch_loss = pool.apply(func=train_model, args=(self.current_model, x, y1, y2, y3, TRAIN_EPOCHS))
+            model, batch_loss = pool.apply(func=train_model, args=(self.current_model, x, y_c, y_f, y_t, TRAIN_EPOCHS))
             pool.close()
         self.save_model(model, batch_loss)
 

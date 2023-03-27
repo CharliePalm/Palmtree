@@ -5,9 +5,8 @@ from torch.optim import SGD, Adam
 from torch import from_numpy, device
 from torch.utils.data import DataLoader
 from torch.cuda import is_available
-from batching import TrainData
+from batching import Data
 import torch
-device = device('cuda:0' if is_available() else 'cpu')
 import chess
 from copy import deepcopy
 
@@ -29,20 +28,21 @@ class Palmtree(Module):
     classification_layers = []
     from_policy_layers = []
     to_policy_layers = []
-    
-    def __init__(self, data_org=None, num_residuals=24):
+    device = device('cuda:0' if is_available() else 'cpu')
+
+    def __init__(self, data_org=None, num_residuals=5):
         super(Palmtree, self).__init__()
         self.create_model(10)
-        self = self.to(device=device)
+        self = self.to(device=self.device)
         self.data_org = data_org if data_org else DataOrganization()
-        self.optimizer = SGD(self.parameters(), .00005)
+        self.optimizer = SGD(self.parameters(), .001)
         self.policy_loss = CrossEntropyLoss()
         self.classification_loss = MSELoss()
         
     def create_model(self, num_residuals: int):
         self.intro_layers = [
             ZeroPad2d(padding=2),
-            Conv2d(13, 256, 2, 1, 0, device=device),
+            Conv2d(13, 256, 2, 1, 0, device=self.device),
             LeakyReLU()
         ]
         self.zero_pad_1 = self.intro_layers[0]
@@ -51,49 +51,49 @@ class Palmtree(Module):
         
         for idx in range(num_residuals):
             layer = []
-            layer.append(Conv2d(256, 256, 3, 1, padding='same', device=device))
+            layer.append(Conv2d(256, 256, 3, 1, padding='same', device=self.device))
             layer.append(LeakyReLU())
-            layer.append(BatchNorm2d(256))
+            layer.append(BatchNorm2d(256, device=self.device))
             setattr(self, 'conv_'+str(idx+2), layer[0])
             setattr(self, 'lr_'+str(idx+2), layer[1])
             setattr(self, 'bn_'+str(idx+1), layer[2])
             self.residual_layers.append(layer)
         # define classification layers
         self.classification_layers = [
-            ('c_conv_1', Conv2d(256, 256, 2, 1, padding=0, device=device)),
+            ('c_conv_1', Conv2d(256, 256, 2, 1, padding=0, device=self.device)),
             ('c_lr_1', LeakyReLU()),
-            ('c_bn_1', BatchNorm2d(256)),
-            ('c_conv_2', Conv2d(256, 128, 2, 1, padding=0, device=device)),
+            ('c_bn_1', BatchNorm2d(256, device=self.device)),
+            ('c_conv_2', Conv2d(256, 128, 2, 1, padding=0, device=self.device)),
             ('c_lr_2', LeakyReLU()),
-            ('c_bn_2', BatchNorm2d(128)),
-            ('c_conv_3', Conv2d(128, 64, 2, 1, padding=0, device=device)),
+            ('c_bn_2', BatchNorm2d(128, device=self.device)),
+            ('c_conv_3', Conv2d(128, 64, 2, 1, padding=0, device=self.device)),
             ('c_lr_3', LeakyReLU()),
             ('c_mp', MaxPool2d(kernel_size=(2, 2), stride=2)),
             ('c_f', Flatten()),
-            ('c_l_1', Linear(1024, 256, device=device)),
+            ('c_l_1', Linear(1024, 256, device=self.device)),
             ('c_ss', Softsign()),
-            ('c_l_2', Linear(256, 1, device=device)),
+            ('c_l_2', Linear(256, 1, device=self.device)),
             ('c_out', Tanh())
         ]
         for entry in self.from_policy_layers:
             setattr(self, entry[0], entry[1])
         # define policy layers
         self.from_policy_layers = [
-            ('conv_1', Conv2d(256, 256, 2, 1, padding=0, device=device)),
+            ('conv_1', Conv2d(256, 256, 2, 1, padding=0, device=self.device)),
             ('relu_1', ReLU()),
-            ('bn_1', BatchNorm2d(256)),
-            ('conv_2', Conv2d(256, 128, 2, 1, padding=0, device=device)),
+            ('bn_1', BatchNorm2d(256, device=self.device)),
+            ('conv_2', Conv2d(256, 128, 2, 1, padding=0, device=self.device)),
             ('relu_2', ReLU()),
-            ('bn_2', BatchNorm2d(128)),
-            ('c_3', Conv2d(128, 64, 2, 1, padding=0, device=device)),
-            ('relu_2', ReLU()),
-            ('bn_3', BatchNorm2d(64)),
+            ('bn_2', BatchNorm2d(128, device=self.device)),
+            ('c_3', Conv2d(128, 64, 2, 1, padding=0, device=self.device)),
+            ('relu_3', ReLU()),
+            ('bn_3', BatchNorm2d(64, device=self.device)),
             ('mp', MaxPool2d(kernel_size=(2, 2), stride=2)),
             ('f', Flatten()),
-            ('lin_1', Linear(1024, 256, device=device)),
-            ('relu_3', ReLU()),
-            ('lin_2', Linear(256, 64, device=device)),
-            ('out', Softmax(dim=-1))
+            ('lin_1', Linear(1024, 256, device=self.device)),
+            ('relu_4', ReLU()),
+            ('lin_2', Linear(256, 64, device=self.device)),
+            ('out', Softmax(dim=1))
         ]
         
         self.to_policy_layers = deepcopy(self.from_policy_layers)
@@ -124,34 +124,41 @@ class Palmtree(Module):
         return classification_out, policy_from_out, policy_to_out
         
     def train(self, x, y_class, y_fr, y_to, epochs, verbose=True) -> dict:
+        verbosity = 100
         hist_to = []
         hist_from = []
         hist_class = []
-        data = DataLoader(TrainData(x, y_class, y_fr, y_to, device), 32, False)
+        hist_total = []
+        data = DataLoader(Data(x, device, y_class, y_fr, y_to), 8, False)
         for epoch in range(epochs):
             running_loss = 0.0
+            h_t = h_f = h_c = h_total = 0
             for idx, (x_i, y_c, y_f, y_t) in enumerate(data):
                 self.optimizer.zero_grad()
                 classification, policy_from, policy_to = self(x_i)
-                
                 class_loss = self.classification_loss(classification, y_c)
                 from_loss = self.policy_loss(policy_from, y_f)
                 to_loss = self.policy_loss(policy_to, y_t)
                 
                 loss = to_loss + from_loss + class_loss
-                running_loss += to_loss.item() + from_loss.item() + class_loss.item()
+                running_loss += loss.item()
                 
-                hist_to.append(to_loss.item())
-                hist_from.append(from_loss.item())
-                hist_class.append(class_loss.item())
-                
+                h_t += to_loss.item()
+                h_f += from_loss.item()
+                h_c += class_loss.item()
                 loss.backward()
                 self.optimizer.step()
-                if verbose and idx % 30 == 29:
-                    print(f'[{epoch + 1}, {idx + 1:5d}] loss: {running_loss / 2000:.3f}')
-                    running_loss = 0.0
+            if verbose:
+                #print(f'[{epoch + 1}, {idx + 1:5d}] loss: {running_loss / verbosity:.3f}')
+                h_total += running_loss
+                running_loss = 0.0
+                print(f'epoch {epoch + 1} complete. loss:\ntotal: {h_total / len(data):.3f}, from: {h_f / len(data):.3f}, to: {h_t / len(data):.3f}, class: {h_c / len(data):.3f}')
+            hist_total.append(h_total / len(data))
+            hist_from.append(h_f / len(data))
+            hist_class.append(h_c / len(data))
+            hist_to.append(h_t / len(data))
         return {
-            'class': hist_class, 'from': hist_from, 'to': hist_to
+            'class': hist_class, 'from': hist_from, 'to': hist_to, 'total': hist_total
         }
 
 
@@ -179,8 +186,7 @@ class Palmtree(Module):
         return from_squares, to_squares, rating
     
     def predict_on_batch(self, batch):
-        batch = torch.tensor(batch, dtype=torch.float32).permute((2, 0, 1))
-        return self(batch)
+        return self(batch.x)
 
     @staticmethod
     def interpret_p(from_squares, to_squares, board: chess.Board):

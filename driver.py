@@ -44,8 +44,11 @@ class Driver:
             hist = self.tree.train(x=x, y_class=y1, y_fr=y2, y_to=y3, epochs=epochs, verbose=1)
 
         self.pickle(self.tree, 'models/ALBERT')
-        plt.plot(hist.history['loss'])
-        print(hist.history)
+        plt.plot(hist['class'], label='class')
+        plt.plot(hist['from'], label='from')
+        plt.plot(hist['to'], label='to')
+        plt.plot(hist['total'], label='total')
+        plt.legend()
         plt.show()
 
     def pickle(self, data, path):
@@ -173,7 +176,7 @@ class Driver:
 
 
 if __name__ == "__main__":
-    mp.set_start_method('fork')
+    mp.set_start_method('spawn')
     from argparse import ArgumentParser
     parser = ArgumentParser()
     parser.add_argument('-t', '--train', action="store_true")
