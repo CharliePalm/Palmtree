@@ -25,7 +25,7 @@ It's also worth noting that the main branch currently is using plaidml. If I dec
 For NVIDIA, using the 1060 was easy but obviously not particularly performative. To get a model that could play for more than 5 moves without imploding I would need to train for several days. This isn't surprising, I just wish I had access to more high end NVIDIA cards to train with.
 
 ## Findings
-In the end, the primary difference between MCTS and pure 'image classification' type models was the ~flavor~ of play. 
+In the end, the primary difference between MCTS and pure 'image classification' type models was the flavor of play. 
 This is to say, the depth of the MCTS search was limited for hardware purposes, so it never learned openings particularly well, while openings made up the majority of the positions the image classification model saw, so it frequently played classical chess theory up until about move 3 or 4.
 However, since the image classification had no lookahead, once its opponent blundered a piece, it rarely saw how to take advantage of it, as it rarely saw blunders of that caliber in its learning.
 
