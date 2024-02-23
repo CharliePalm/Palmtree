@@ -37,6 +37,9 @@ class Player:
         board.pop()
         return move
 
+    '''
+    think about game states until interrupted
+    '''
     def discover(self):
         while 1:
             with self.discovery_lock:

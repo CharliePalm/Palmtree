@@ -5,7 +5,7 @@ from palmtree import Palmtree
 from player import Player
 PORT = 4200
 base_path = 'https://lichess.org/api/'
-KEY = 'lip_D2bQfLRCYFUJVqYEHKh8' #TODO : DELETE ME LATER
+KEY = '' #TODO : DELETE ME LATER
 
 class LichessIntegration:
     model: Palmtree

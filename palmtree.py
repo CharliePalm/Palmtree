@@ -124,7 +124,6 @@ class Palmtree(Module):
         return classification_out, policy_from_out, policy_to_out
         
     def train(self, x, y_class, y_fr, y_to, epochs, verbose=True) -> dict:
-        verbosity = 100
         hist_to = []
         hist_from = []
         hist_class = []
